@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# Dados gerados pelo pipeline
+data/raw/
+data/processed/
+
+# Airflow logs
+airflow/logs/
+
+# Ambiente
+.env
+.venv/
+
+# Sistema
+.DS_Store
+Thumbs.db

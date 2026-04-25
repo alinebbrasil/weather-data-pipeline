@@ -1,0 +1,19 @@
+version: "3"
+
+services:
+  airflow:
+    image: apache/airflow:2.9.1
+    container_name: airflow_weather
+    ports:
+      - "8080:8080"
+
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      _PIP_ADDITIONAL_REQUIREMENTS: "pandas requests pyarrow"
+
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ../scripts:/opt/airflow/scripts
+      - ../data:/opt/airflow/data
+
+    command: standalone
