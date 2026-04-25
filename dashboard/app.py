@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-# configuração da página do Streamlit
+# configuração da página
 st.set_page_config(
     page_title="Weather Data Dashboard",
     layout="wide"
@@ -16,7 +16,7 @@ DATA_PATH = "data/processed/weather_hourly.parquet"
 
 def extrair_timestamp_coleta(source_file: str):
     """
-    Extrai o timestamp da coleta a partir do nome do arquivo JSON.
+    Extrai o timestamp de coleta a partir do nome do arquivo JSON.
     """
     match = re.search(r"(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})", source_file)
 
@@ -26,20 +26,19 @@ def extrair_timestamp_coleta(source_file: str):
     return None
 
 
-@st.cache_data
 def carregar_dados(path: str) -> pd.DataFrame:
     """
-    Carrega os dados processados do pipeline e prepara colunas para o dashboard.
+    Carrega os dados processados do pipeline e prepara as colunas para o dashboard.
     """
     df = pd.read_parquet(path)
 
-    # garante que a coluna de data/hora esteja no formato correto
+    # garante que a data/hora esteja no formato correto
     df["datetime"] = pd.to_datetime(df["datetime"])
 
-    # cria a coluna com o horário real da coleta
+    # cria coluna com o timestamp real da coleta
     df["collection_timestamp"] = df["source_file"].apply(extrair_timestamp_coleta)
 
-    # renomeia colunas técnicas para nomes mais amigáveis no dashboard
+    # renomeia colunas técnicas para nomes mais amigáveis
     df = df.rename(columns={
         "city": "Capital",
         "datetime": "Data/Hora",
@@ -57,13 +56,12 @@ df = carregar_dados(DATA_PATH)
 # título principal
 st.title("Weather Data Dashboard")
 
-# descrição geral
 st.write(
-    "Dashboard para acompanhamento de dados meteorológicos de capitais brasileiras "
+    "Dashboard para acompanhamento de dados meteorológicos das capitais brasileiras "
     "coletados via API Open-Meteo e processados por pipeline de dados."
 )
 
-# métricas gerais do dataset
+# visão geral
 st.subheader("Visão geral")
 
 col1, col2, col3 = st.columns(3)
@@ -71,55 +69,71 @@ col1, col2, col3 = st.columns(3)
 col1.metric("Total de registros", len(df))
 col2.metric("Capitais monitoradas", df["Capital"].nunique())
 col3.metric(
-    "Última coleta",
+    "Última coleta registrada",
     df["collection_timestamp"].max().strftime("%d/%m/%Y %H:%M:%S")
 )
 
-# identifica a coleta mais recente do pipeline
-ultima_coleta = df["collection_timestamp"].max()
-
-# filtra apenas os dados da última coleta
-df_ultima_coleta = (
+# mantém uma janela recente de previsões por capital
+# isso evita problemas quando cada capital é coletada em segundos diferentes
+df_ultimas_coletas = (
     df.sort_values("collection_timestamp")
     .groupby("Capital", as_index=False)
     .tail(168)
 )
 
-# para o mapa, usa a primeira previsão disponível de cada capital na última coleta
+# para o mapa, usa a primeira previsão disponível de cada capital nessa janela
 df_mapa = (
-    df_ultima_coleta
+    df_ultimas_coletas
     .sort_values("Data/Hora")
     .groupby("Capital")
     .head(1)
+    .sort_values("Capital")
     .reset_index(drop=True)
 )
 
-# ordena capitais alfabeticamente para facilitar leitura na tabela
-df_mapa = df_mapa.sort_values("Capital").reset_index(drop=True)
-
 st.subheader("Mapa das capitais monitoradas")
 
-# mapa simples usando latitude e longitude
+# mapa simples com latitude e longitude
 st.map(
     df_mapa,
     latitude="latitude",
     longitude="longitude",
-    size=80
+    size=120
 )
 
-# tabela-resumo das capitais
 st.subheader("Resumo das capitais")
 
+# tabela-resumo ordenada alfabeticamente
 st.dataframe(
     df_mapa[[
         "Capital",
         "Temperatura (°C)",
         "Precipitação (mm)",
         "Vento (km/h)"
-    ]]
+    ]].sort_values("Capital").reset_index(drop=True),
+    use_container_width=True
 )
 
-# filtro por capital
+# ranking de temperatura atual por capital
+st.subheader("Ranking de temperatura por capital")
+
+ranking_temperatura = (
+    df_mapa[[
+        "Capital",
+        "Temperatura (°C)",
+        "Precipitação (mm)",
+        "Vento (km/h)"
+    ]]
+    .sort_values("Temperatura (°C)", ascending=False)
+    .reset_index(drop=True)
+)
+
+st.dataframe(
+    ranking_temperatura,
+    use_container_width=True
+)
+
+# análise individual por capital
 st.subheader("Análise por capital")
 
 capitais = sorted(df["Capital"].unique())
@@ -129,29 +143,33 @@ capital_selecionada = st.selectbox(
     capitais
 )
 
-# filtra a capital selecionada usando apenas a última coleta
-df_capital = df_ultima_coleta[
-    df_ultima_coleta["Capital"] == capital_selecionada
-].copy()
+# filtra dados da capital selecionada
+df_capital = df[df["Capital"] == capital_selecionada].copy()
 
-# ordena por data/hora para garantir gráficos temporais corretos
-df_capital = df_capital.sort_values("Data/Hora")
+# usa a janela mais recente da capital selecionada
+df_capital = (
+    df_capital
+    .sort_values("collection_timestamp")
+    .tail(168)
+    .sort_values("Data/Hora")
+)
 
-# cálculo dos indicadores da capital selecionada
+# cálculo dos indicadores
 temperatura_media = round(df_capital["Temperatura (°C)"].mean(), 2)
 temperatura_maxima = round(df_capital["Temperatura (°C)"].max(), 2)
+temperatura_minima = round(df_capital["Temperatura (°C)"].min(), 2)
 precipitacao_total = round(df_capital["Precipitação (mm)"].sum(), 2)
 vento_medio = round(df_capital["Vento (km/h)"].mean(), 2)
 
-# exibição dos indicadores
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
-col1.metric("Temperatura média (°C)", temperatura_media)
-col2.metric("Temperatura máxima (°C)", temperatura_maxima)
-col3.metric("Precipitação total (mm)", precipitacao_total)
-col4.metric("Vento médio (km/h)", vento_medio)
+col1.metric("Temp. média (°C)", temperatura_media)
+col2.metric("Temp. máxima (°C)", temperatura_maxima)
+col3.metric("Temp. mínima (°C)", temperatura_minima)
+col4.metric("Precipitação total (mm)", precipitacao_total)
+col5.metric("Vento médio (km/h)", vento_medio)
 
-# gráfico de temperatura
+# gráficos temporais
 st.subheader("Previsão horária de temperatura (°C)")
 
 st.line_chart(
@@ -160,7 +178,6 @@ st.line_chart(
     y="Temperatura (°C)"
 )
 
-# gráfico de precipitação
 st.subheader("Previsão horária de precipitação (mm)")
 
 st.line_chart(
@@ -169,7 +186,6 @@ st.line_chart(
     y="Precipitação (mm)"
 )
 
-# gráfico de vento
 st.subheader("Previsão horária de vento (km/h)")
 
 st.line_chart(
@@ -178,7 +194,7 @@ st.line_chart(
     y="Vento (km/h)"
 )
 
-# tabela detalhada da capital selecionada
+# dados detalhados
 st.subheader("Dados detalhados da capital selecionada")
 
 st.dataframe(
@@ -188,6 +204,8 @@ st.dataframe(
         "Temperatura (°C)",
         "Precipitação (mm)",
         "Vento (km/h)",
+        "collection_timestamp",
         "source_file"
-    ]]
+    ]],
+    use_container_width=True
 )
